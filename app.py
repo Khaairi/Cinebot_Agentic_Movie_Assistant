@@ -145,7 +145,7 @@ with st.sidebar:
         df = pd.DataFrame(st.session_state["watchlist"])
         st.dataframe(df[['title', 'rating']], hide_index=True, use_container_width=True)
         
-        # 3. Download Watchlist
+        # Download Watchlist
         json_string = json.dumps(st.session_state["watchlist"], indent=4)
         st.download_button(
             label="Download Watchlist",
