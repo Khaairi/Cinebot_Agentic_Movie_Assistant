@@ -12,10 +12,10 @@
 ### Real-Time Movie Data (TMDB Integration)
 * Fetches live data using **The Movie Database (TMDB) API**.
 * Displays rich **Visual Cards** containing:
-    * High-resolution Posters.
-    * Star Ratings (1-decimal precision).
-    * Release Date & Runtime.
-    * Top Cast/Actors.
+    * Posters.
+    * Rating.
+    * Release Date.
+    * Runtime.
     * Synopsis/Overview.
 
 ### Smart Watchlist Management
