@@ -171,9 +171,37 @@ with st.sidebar:
     if uploaded_watchlist:
         try:
             data = json.load(uploaded_watchlist)
+<<<<<<< HEAD
             st.session_state["watchlist"] = data
         except: pass
     watchlist_placeholder = st.empty()
+=======
+            if isinstance(data, list):
+                st.session_state["watchlist"] = data
+                st.success("Watchlist berhasil dimuat!")
+        except Exception as e:
+            st.error("File JSON tidak valid.")
+    
+    if st.session_state["watchlist"]:
+        # Tampilkan sebagai dataframe kecil agar rapi
+        df = pd.DataFrame(st.session_state["watchlist"])
+        st.dataframe(df[['title', 'rating']], hide_index=True, use_container_width=True)
+        
+        # Download Watchlist
+        json_string = json.dumps(st.session_state["watchlist"], indent=4)
+        st.download_button(
+            label="Download Watchlist",
+            data=json_string,
+            file_name="my_watchlist.json",
+            mime="application/json"
+        )
+        
+        if st.button("Clear Watchlist"):
+            st.session_state["watchlist"] = []
+            st.rerun()
+    else:
+        st.info("Watchlist masih kosong. Suruh saya nambahin film!")
+>>>>>>> d2d6dcf7c619cbed31eb1ba10568040ee275884d
     
     st.divider()
     
