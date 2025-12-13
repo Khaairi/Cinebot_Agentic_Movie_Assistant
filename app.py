@@ -104,6 +104,44 @@ def add_to_watchlist(query: str):
     except Exception as e:
         return json.dumps({"status": "error", "message": str(e)})
 
+@tool
+def remove_from_watchlist(query: str):
+    """
+    Gunakan alat ini ketika user secara eksplisit meminta untuk MENGHAPUS atau MEMBUANG film dari watchlist.
+    Input: Judul film.
+    """
+    try:
+        # 1. Cari dulu ID film berdasarkan judul agar akurat
+        search = movie_service.search(query)
+        if not search:
+            return json.dumps({"status": "failed", "message": f"Film '{query}' tidak ditemukan di database, tidak bisa dihapus."})
+        
+        target_id = search[0].id
+        target_title = search[0].title
+        
+        # 2. Cari di watchlist dan hapus
+        found = False
+        for i, movie in enumerate(st.session_state["watchlist"]):
+            if movie['id'] == target_id:
+                st.session_state["watchlist"].pop(i)
+                found = True
+                break
+        
+        if found:
+            return json.dumps({
+                "status": "success",
+                "title": target_title,
+                "message": f"Berhasil menghapus '{target_title}' dari watchlist."
+            })
+        else:
+            return json.dumps({
+                "status": "failed",
+                "message": f"Film '{target_title}' tidak ditemukan di dalam watchlist kamu."
+            })
+
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
+
 st.set_page_config(
     page_title="CineBot",
     page_icon="🎬",
@@ -129,36 +167,13 @@ with st.sidebar:
     st.divider()
 
     st.header("My Watchlist")
-
-    uploaded_watchlist = st.file_uploader("Upload Watchlist (JSON)", type=["json"])
+    uploaded_watchlist = st.file_uploader("Upload JSON", type=["json"], key="static_uploader")
     if uploaded_watchlist:
         try:
             data = json.load(uploaded_watchlist)
-            if isinstance(data, list):
-                st.session_state["watchlist"] = data
-                st.success("Watchlist berhasil dimuat!")
-        except Exception as e:
-            st.error("File JSON tidak valid.")
-    
-    if st.session_state["watchlist"]:
-        # Tampilkan sebagai dataframe kecil agar rapi
-        df = pd.DataFrame(st.session_state["watchlist"])
-        st.dataframe(df[['title', 'rating']], hide_index=True, use_container_width=True)
-        
-        # 3. Download Watchlist
-        json_string = json.dumps(st.session_state["watchlist"], indent=4)
-        st.download_button(
-            label="Download Watchlist",
-            data=json_string,
-            file_name="my_watchlist.json",
-            mime="application/json"
-        )
-        
-        if st.button("Clear Watchlist"):
-            st.session_state["watchlist"] = []
-            st.rerun()
-    else:
-        st.info("Watchlist masih kosong. Suruh saya nambahin film!")
+            st.session_state["watchlist"] = data
+        except: pass
+    watchlist_placeholder = st.empty()
     
     st.divider()
     
@@ -166,6 +181,31 @@ with st.sidebar:
     if st.button("Hapus Percakapan"):
         st.session_state.messages_history = []
         st.rerun()
+
+def render_watchlist_ui(key_suffix="init"):
+    with watchlist_placeholder.container():
+        if st.session_state["watchlist"]:
+            df = pd.DataFrame(st.session_state["watchlist"])
+            st.dataframe(df[['title', 'rating']], hide_index=True, use_container_width=True)
+            
+            json_str = json.dumps(st.session_state["watchlist"], indent=4)
+            
+            # Tombol Download & Clear harus punya key unik setiap kali render
+            st.download_button(
+                "Download", 
+                json_str, 
+                "watchlist.json", 
+                "application/json", 
+                key=f"dl_btn_{key_suffix}"
+            )
+            
+            if st.button("Clear All", key=f"clr_btn_{key_suffix}"):
+                st.session_state["watchlist"] = []
+                st.rerun()
+        else:
+            st.info("Watchlist kosong.")
+    
+render_watchlist_ui("initial_load")
 
 def get_system_message(persona_choice):
     base_instruction = """Kamu adalah asisten AI ahli film. Tugasmu adalah merekomendasikan film, diskusi plot, dan memberi fakta menarik. 
@@ -178,6 +218,7 @@ def get_system_message(persona_choice):
     4. Jika tool berhasil mengambil data, jadikan data tersebut sebagai referensi untuk jawaban dan tambahkan detail dan fakta-fakta menarik seputar film tersebut.
     5. Jika user mengirim gambar, analisalah gambar tersebut.
     6. Jika user meminta untuk menambahkan film ke watchlist maka panggil tool 'add_to_watchlist'
+    7. Jika user meminta untuk menghapus atau membuang film dari watchlist maka panggil tool 'remove_from_watchlist'
     """
 
     if "Gaul" in persona_choice:
@@ -194,7 +235,7 @@ if not gemini_key:
     st.warning("Masukkan Google Gemini API Key di sidebar untuk memulai.")
     st.stop()
 
-tools = [get_movie_info, add_to_watchlist]
+tools = [get_movie_info, add_to_watchlist, remove_from_watchlist]
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=gemini_key)
 llm = llm.bind_tools(tools)
@@ -326,8 +367,18 @@ if prompt:
                         if data["status"] == "success":
                             st.success(data["message"])
                             st.toast(f"✅ {data['title']} ditambahkan!")
+                            render_watchlist_ui("refresh_add")
                         elif data["status"] == "exists":
                             st.warning(data["message"])
+                        else:
+                            st.error(data["message"])
+                    elif tool_name == "remove_from_watchlist":
+                        raw_res = remove_from_watchlist.invoke(tool_args)
+                        data = json.loads(raw_res)
+                        if data["status"] == "success":
+                            st.success(data["message"])
+                            st.toast(f"🗑️ {data['title']} dihapus!")
+                            render_watchlist_ui("refresh_remove") # REFRESH UI
                         else:
                             st.error(data["message"])
 
