@@ -8,8 +8,13 @@ import json
 import pandas as pd
 import os
 from dotenv import load_dotenv
+from langchain_community.utilities import GoogleSearchAPIWrapper
 
 load_dotenv()
+
+google_api_key = os.getenv("GOOGLE_API_KEY")
+google_cse_id = os.getenv("GOOGLE_CSE_ID")
+search = GoogleSearchAPIWrapper(google_api_key=google_api_key, google_cse_id=google_cse_id)
 
 tmdb = TMDb()
 tmdb.language = 'en'
@@ -28,6 +33,34 @@ def get_image_base64(uploaded_file):
     except Exception as e:
         st.error(f"Error processing image: {e}")
         return None
+    
+@tool
+def search_cinema_schedule(location: str, movie_title: str = ""):
+    """
+    Gunakan alat ini jika user bertanya tentang JADWAL BIOSKOP, HARGA TIKET, 
+    atau film yang tayang DI KOTA TERTENTU (misal: "Jadwal di Bandung", "XXI Jakarta").
+    
+    Alat ini melakukan pencarian Google untuk mendapatkan informasi terkini.
+    """
+    try:
+        if movie_title:
+            query = f"site:jadwalnonton.com/now-playing jadwal film {movie_title} di bioskop {location} hari ini"
+        else:
+            query = f"site:jadwalnonton.com/now-playing jadwal film bioskop di {location} hari ini"
+        
+        search_results = search.results(query, 1)
+        
+        if not search_results:
+            return "Maaf, tidak ditemukan jadwal di Google untuk lokasi tersebut."
+        
+        parsed_results = []
+        for res in search_results:
+            parsed_results.append(f"Source: {res['title']}\nSnippet: {res['snippet']}")
+            
+        return "\n\n".join(parsed_results)
+            
+    except Exception as e:
+        return f"Error Google Search: {str(e)}"
     
 @tool
 def get_movie_info(query: str):
@@ -69,7 +102,7 @@ def get_movie_info(query: str):
             "original_title": res.original_title,
             "overview": res.overview,
             "rating": rating_fixed,
-            "genre": final_genres,
+            "genres": final_genres,
             "release_date": res.release_date,
             "poster": poster_url,
             "runtime": details.runtime,
@@ -111,7 +144,7 @@ def add_to_watchlist(query: str):
         new_entry = {
             "id": movie.id,
             "title": movie.title,
-            "genre": final_genres,
+            "genres": final_genres,
             "rating": f"{movie.vote_average:.1f}",
             "runtime": details.runtime
         }
@@ -181,25 +214,34 @@ def recommend_from_watchlist(target_genre: str, max_minutes: int):
     # 1. Filter berdasarkan Genre
     # Jika user bilang 'bebas', target_genre bisa diabaikan atau string kosong
     filtered_movies = []
+    target_genre_lower = target_genre.lower().strip()
     if target_genre and target_genre.lower() != "bebas":
         for m in watchlist:
-            # Cek apakah genre user ada di dalam list genre film
-            # m['genres'] adalah list string, misal ["Horror", "Thriller"]
-            movie_genres = [g.lower() for g in m.get('genres', [])]
-            if target_genre.lower() in movie_genres:
+            raw_genres = m.get('genres', [])
+            movie_genres_list = []
+            if isinstance(raw_genres, str):
+                movie_genres_list = [g.strip().lower() for g in raw_genres.split(',')]
+            if target_genre_lower == 'sci-fi': target_genre_lower = 'science fiction'
+            
+            if target_genre_lower in movie_genres_list:
                 filtered_movies.append(m)
     else:
         filtered_movies = watchlist # Ambil semua jika genre bebas
 
     # 2. Sorting: Prioritaskan Rating Tinggi
-    filtered_movies.sort(key=lambda x: x['rating'], reverse=True)
+    filtered_movies.sort(key=lambda x: float(x.get('rating', 0)), reverse=True)
 
     # 3. Logika Seleksi (Greedy Algorithm sederhana)
     selected_movies = []
     current_time = 0
     
     for movie in filtered_movies:
-        runtime = movie.get('runtime', 0)
+        # Pastikan runtime dibaca sebagai integer
+        try:
+            runtime = int(movie.get('runtime', 0))
+        except:
+            runtime = 0
+            
         if current_time + runtime <= max_minutes:
             selected_movies.append(movie)
             current_time += runtime
@@ -265,7 +307,7 @@ def render_watchlist_ui(key_suffix="init"):
     with watchlist_placeholder.container():
         if st.session_state["watchlist"]:
             df = pd.DataFrame(st.session_state["watchlist"])
-            st.dataframe(df[['title', 'genre', 'rating', 'runtime']], hide_index=True, use_container_width=True)
+            st.dataframe(df[['title', 'genres', 'rating', 'runtime']], hide_index=True, use_container_width=True)
             
             json_str = json.dumps(st.session_state["watchlist"], indent=4)
             
@@ -298,6 +340,10 @@ def get_system_message(persona_choice):
     5. Jika user mengirim gambar, analisalah gambar tersebut.
     6. Jika user meminta untuk menambahkan film ke watchlist maka panggil tool 'add_to_watchlist'
     7. Jika user meminta untuk menghapus atau membuang film dari watchlist maka panggil tool 'remove_from_watchlist'
+
+    PENTING:
+    - Jika menggunakan 'search_cinema_schedule', rangkum hasil pencarian Google menjadi daftar yang rapi (Bullet points).
+    - Jangan berhalusinasi jam tayang jika tidak ada di hasil pencarian.
     """
 
     if "Gaul" in persona_choice:
@@ -314,7 +360,11 @@ if not gemini_key:
     st.warning("Masukkan Google Gemini API Key di sidebar untuk memulai.")
     st.stop()
 
-tools = [get_movie_info, add_to_watchlist, remove_from_watchlist, recommend_from_watchlist]
+tools = [get_movie_info, 
+         add_to_watchlist, 
+         remove_from_watchlist, 
+         recommend_from_watchlist, 
+         search_cinema_schedule]
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_key)
 llm = llm.bind_tools(tools)
@@ -345,7 +395,7 @@ for message in messages_history:
                             st.image(data['poster'], use_container_width=True)
                         with col2:
                             st.subheader(data['title'])
-                            st.caption(f"Original Title: {data['original_title']} | | Genre: {data['genre']} | Rilis: {data['release_date']} | Runtime: {data['runtime']} Min")
+                            st.caption(f"Original Title: {data['original_title']} | | Genre: {data['genres']} | Rilis: {data['release_date']} | Runtime: {data['runtime']} Min")
                             st.write(f"⭐ **{data['rating']}**")
                             st.info(data['overview'])
                 elif data.get("movies"):
@@ -440,7 +490,7 @@ if prompt:
                                     st.image(data['poster'], use_container_width=True)
                                 with col2:
                                     st.subheader(data['title'])
-                                    st.caption(f"Original Title: {data['original_title']} | | Genre: {data['genre']} | Rilis: {data['release_date']} | Runtime: {data['runtime']} Min")
+                                    st.caption(f"Original Title: {data['original_title']} | | Genre: {data['genres']} | Rilis: {data['release_date']} | Runtime: {data['runtime']} Min")
                                     st.write(f"⭐ **{data['rating']}**")
                                     st.info(data['overview'])
                         else:
@@ -481,6 +531,9 @@ if prompt:
                                     st.caption(f"⏱️ {mov['runtime']} menit | ⭐ {mov['rating']} | {g_list}")
                         else:
                             st.warning(data.get("message"))
+                    elif tool_name == "search_cinema_schedule":
+                        raw_res = search_cinema_schedule.invoke(tool_args)
+                        st.markdown(raw_res)
                     
 
                     # Simpan hasil tool ke history agar AI tahu datanya
