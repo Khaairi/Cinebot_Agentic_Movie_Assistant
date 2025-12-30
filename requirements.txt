@@ -3,3 +3,8 @@ langchain-google-genai
 langchain-core
 tmdbv3api
 pandas
+langchain-qdrant
+qdrant-client
+pypdf
+sentence-transformers
+langchain-huggingface

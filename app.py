@@ -1,5 +1,5 @@
 import streamlit as st
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 import base64
@@ -9,12 +9,23 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_qdrant import QdrantVectorStore
+import tempfile
+from qdrant_utils import create_collection_if_not_exists
+from qdrant_utils import qdrant
+from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
 
 google_api_key = os.getenv("GOOGLE_API_KEY")
 google_cse_id = os.getenv("GOOGLE_CSE_ID")
 search = GoogleSearchAPIWrapper(google_api_key=google_api_key, google_cse_id=google_cse_id)
+collection = "cinebot"
 
 tmdb = TMDb()
 tmdb.language = 'en'
@@ -260,6 +271,22 @@ def recommend_from_watchlist(target_genre: str, max_minutes: int):
         "movies": selected_movies
     })
 
+@tool
+def ask_movie_script(question: str):
+    """
+    Gunakan alat ini HANYA jika user bertanya tentang isi DOKUMEN/PDF/SCRIPT FILM yang mereka unggah.
+    Contoh pertanyaan: "Apa yang terjadi di halaman 10?", "Bagaimana karakter A mati?", "Ringkaskan script ini".
+    """
+    if "rag_chain" not in st.session_state:
+        return "User belum mengunggah dokumen PDF. Minta user upload file dulu di sidebar."
+    
+    try:
+        # Jalankan RAG Chain yang sudah tersimpan di session state
+        response = st.session_state["rag_chain"].invoke({"input": question})
+        return response["answer"]
+    except Exception as e:
+        return f"Error RAG: {str(e)}"
+
 st.set_page_config(
     page_title="CineBot",
     page_icon="🎬",
@@ -282,10 +309,83 @@ with st.sidebar:
     if not os.getenv("GEMINI_KEY"):
         gemini_key = st.text_input("Masukkan Google Gemini API Key:", type="password")
         st.markdown("[Belum punya API Key? dapatkan di sini](https://aistudio.google.com/app/apikey)")
-
-        st.divider()
     else:
         gemini_key = os.getenv("GEMINI_KEY")
+
+    
+    st.header("Chat Script/Buku")
+    st.caption("Upload PDF script film atau buku, lalu tanya isinya di chat.")
+    uploaded_pdf = st.file_uploader("Upload PDF", type="pdf")
+
+    if uploaded_pdf and gemini_key:
+        if "last_uploaded" not in st.session_state or st.session_state["last_uploaded"] != uploaded_pdf.name:
+            with st.spinner("Membaca & Mempelajari dokumen..."):
+                try:
+                    # 1. Simpan file sementara
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        tmp_file.write(uploaded_pdf.getvalue())
+                        tmp_file_path = tmp_file.name
+
+                    # 2. Load PDF
+                    loader = PyPDFLoader(tmp_file_path)
+                    docs = loader.load()
+                    print(docs)
+
+                    # 3. Split Text
+                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                    splits = text_splitter.split_documents(docs)
+
+                    # 4. Embeddings & Qdrant Vector Store
+                    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+                    try:
+                        qdrant.delete_collection(collection_name=collection)
+                    except:
+                        pass
+
+                    create_collection_if_not_exists(collection_name=collection)
+
+                    vectorstore = QdrantVectorStore(
+                        client=qdrant,
+                        embedding=embeddings,
+                        collection_name=collection
+                    )
+
+                    vectorstore.add_documents(documents=splits)
+                    
+                    # 5. Create Chain
+                    retriever = vectorstore.as_retriever()
+                    
+                    system_prompt = (
+                        "Kamu adalah asisten yang menjawab pertanyaan berdasarkan konteks dokumen film yang diberikan. "
+                        "Jika jawaban tidak ada di dokumen, bilang tidak tahu. "
+                        "Jawab dengan lengkap dan jelas."
+                        "\n\n"
+                        "{context}"
+                    )
+                    prompt_rag = ChatPromptTemplate.from_messages([
+                        ("system", system_prompt),
+                        ("human", "{input}"),
+                    ])
+                    
+                    question_answer_chain = create_stuff_documents_chain(
+                        ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_key), 
+                        prompt_rag
+                    )
+                    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+                    
+                    # Simpan ke Session State
+                    st.session_state["rag_chain"] = rag_chain
+                    st.session_state["last_uploaded"] = uploaded_pdf.name
+                    st.success("✅ Dokumen siap didiskusikan!")
+                    
+                    # Hapus file temp
+                    os.remove(tmp_file_path)
+                    
+                except Exception as e:
+                    st.error(f"Gagal memproses dokumen: {e}")
+
+    st.divider()
 
     st.header("My Watchlist")
     uploaded_watchlist = st.file_uploader("Upload JSON", type=["json"], key="static_uploader")
@@ -364,7 +464,8 @@ tools = [get_movie_info,
          add_to_watchlist, 
          remove_from_watchlist, 
          recommend_from_watchlist, 
-         search_cinema_schedule]
+         search_cinema_schedule,
+         ask_movie_script]
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_key)
 llm = llm.bind_tools(tools)
@@ -534,6 +635,9 @@ if prompt:
                     elif tool_name == "search_cinema_schedule":
                         raw_res = search_cinema_schedule.invoke(tool_args)
                         st.markdown(raw_res)
+                    elif tool_name == "ask_movie_script":
+                        raw_res = ask_movie_script.invoke(tool_args)
+                        st.info(f"📄 **Jawaban Dokumen:**\n\n{raw_res}")
                     
 
                     # Simpan hasil tool ke history agar AI tahu datanya
