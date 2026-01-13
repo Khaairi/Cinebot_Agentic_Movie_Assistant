@@ -8,6 +8,11 @@
 * **Customizable Personas:** Choose between:
     * *Casual Cinephile:* Uses slang, friendly, and enthusiastic tone.
     * *Film Critic:* Formal, analytical, and poetic tone.
+ 
+### Chat with Scripts & Books (RAG)
+* **Interactive Document Analysis:** Upload movie scripts, screenplays, or film theory books (PDF) directly via the sidebar.
+* **Contextual Q&A:** Ask specific questions like *"What does the script say about the ending?"*, *"Summarize the dialogue on page 10,"* or *"How is the character arc described?"*
+* **Zero Hallucination:** The bot answers strictly based on the uploaded document's content.
 
 ### Real-Time Movie Data (TMDB Integration)
 * Fetches live data using **The Movie Database (TMDB) API**.
@@ -34,8 +39,10 @@
 * **Frontend:** [Streamlit](https://streamlit.io/) (v1.41.0+)
 * **Orchestration:** [LangChain](https://www.langchain.com/)
 * **AI Model:** Google Gemini 2.0 Flash (via `langchain-google-genai`)
+* **Embeddings:** HuggingFace (`all-MiniLM-L6-v2`) via `langchain-huggingface`
+* **Vector Database:** [Qdrant](https://qdrant.tech/) (Cloud)
 * **Data Source:** [TMDB API](https://www.themoviedb.org/) (via `tmdbv3api`)
-* **Data Handling:** Pandas & JSON
+* **Data Handling:** Pandas, PyPDF & JSON
 
 ## Installation & Setup
 
@@ -73,6 +80,7 @@ cinebot-project/
 |--------------|---------------------------------------|
 |    ![WhatsApp Image 2025-11-23 at 8 46 54 PM](https://github.com/user-attachments/assets/b5cf06c8-0cd5-4342-85fb-706cdf72d3e5)   | ![WhatsApp Image 2025-11-23 at 9 38 49 PM](https://github.com/user-attachments/assets/581ce0db-42d3-46be-8ce0-eac715f837e8)  |
 |    ![WhatsApp Image 2025-12-22 at 10 24 35 AM](https://github.com/user-attachments/assets/83f290be-7e92-4973-84e6-9b4747ee425b)  | ![WhatsApp Image 2025-12-22 at 12 59 46 PM](https://github.com/user-attachments/assets/f94e533a-10e0-4812-9ad8-98d45ab07528) |
+|  ![WhatsApp Image 2025-12-30 at 6 59 48 PM](https://github.com/user-attachments/assets/700f35b5-90a6-4a8b-a357-73abc083eb44) |  ![WhatsApp Image 2025-12-30 at 7 04 11 PM](https://github.com/user-attachments/assets/9cb1f059-64f5-463b-af35-c76f1c217faa) |
 
 
 
