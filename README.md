@@ -1,3 +1,14 @@
+---
+license: apache-2.0
+title: Cinebot Agentic Movie Assistant
+sdk: docker
+emoji: 🎬
+colorFrom: purple
+pinned: false
+colorTo: gray
+short_description: Space for agentic movie assistant using Streamlit
+app_port: 8501
+---
 # Cinebot
 **CineBot** is an intelligent, AI-powered conversational agent designed to be your ultimate movie companion. Built with **Streamlit** and powered by **Google Gemini 2.0 Flash**, this bot utilizes **Agentic Workflow (Function Calling)** to provide real-time movie data, recommendations, and personal watchlist management.
 
