@@ -1,5 +1,6 @@
 streamlit>=1.41.0
 langchain-google-genai
+langchain-community
 langchain-core
 tmdbv3api
 pandas
@@ -9,3 +10,4 @@ pypdf
 sentence-transformers
 langchain-huggingface
 python-dotenv
+google-search-results
