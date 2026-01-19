@@ -151,6 +151,30 @@ class MessageRenderer:
     def __init__(self, ui_components: UIComponents):
         """Initialize with UI components."""
         self.ui = ui_components
+
+    def _get_clean_content(self, content: Any) -> str:
+        """
+        Helper to safely extract string text from mixed content types
+        (String, List of Dicts, etc).
+        """
+        # If it's already a string, return it
+        if isinstance(content, str):
+            return content
+        
+        # If it's a list 
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                # Extract text from dict
+                if isinstance(part, dict) and "text" in part:
+                    text_parts.append(str(part["text"]))
+                # If the part itself is a string
+                elif isinstance(part, str):
+                    text_parts.append(part)
+            return "".join(text_parts)
+            
+        # Fallback
+        return str(content)
     
     def render_tool_message(self, message: Any):
         """
@@ -161,7 +185,8 @@ class MessageRenderer:
         """
         with st.chat_message("AI"):
             try:
-                data = json.loads(message.content)
+                content_str = self._get_clean_content(message.content)
+                data = json.loads(content_str)
                 
                 # Movie info card
                 if data.get("found") and "poster" in data:
@@ -190,10 +215,13 @@ class MessageRenderer:
                 st.markdown(message.content)
             elif isinstance(message.content, list):
                 for part in message.content:
-                    if part.get('type') == 'text':
-                        st.markdown(part['text'])
-                    elif part.get('type') == 'image_url':
-                        st.image(part['image_url']['url'], width=150)
+                    if isinstance(part, dict):
+                        if part.get('type') == 'text':
+                            st.markdown(part['text'])
+                        elif part.get('type') == 'image_url':
+                            url = part.get('image_url', {}).get('url', '')
+                            if url:
+                                st.image(url, width=150)
     
     def render_ai_message(self, message: Any):
         """
@@ -203,4 +231,5 @@ class MessageRenderer:
             message: AIMessage object
         """
         with st.chat_message("AI"):
-            st.markdown(message.content)
+            clean_text = self._get_clean_content(message.content)
+            st.markdown(clean_text)

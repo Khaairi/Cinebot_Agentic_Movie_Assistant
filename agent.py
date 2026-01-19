@@ -119,21 +119,6 @@ class CineBotAgent:
         self.tools_dict = {tool.name: tool for tool in tools}
         self.conversation = conversation_manager
     
-    def process_message(self, message: HumanMessage) -> AIMessage:
-        """
-        Process user message and return AI response.
-        
-        Args:
-            message: User message
-            
-        Returns:
-            AI response message
-        """
-        self.conversation.add_message(message)
-        response = self.llm.invoke(self.conversation.get_messages())
-        self.conversation.add_message(response)
-        return response
-    
     def execute_tools(self, response: AIMessage) -> AIMessage:
         """
         Execute any tool calls in the response.
@@ -169,44 +154,70 @@ class CineBotAgent:
         
         return final_response
     
-    def handle_message(self, message: HumanMessage) -> tuple[AIMessage, List[Dict]]:
+    def stream_handler(self, message: HumanMessage):
         """
-        Handle a complete message cycle including tool execution.
-        
-        Args:
-            message: User message
-            
-        Returns:
-            Tuple of (final_response, tool_results)
+        Generator that yields chunks of text or tool results.
         """
-        tool_results = []
+        # Add User Message to History
+        self.conversation.add_message(message)
         
-        # Get initial response
-        response = self.process_message(message)
+        # Prepare context (System + Last 10 messages)
+        messages_history = self.conversation.get_messages()
+        messages_to_send = [messages_history[0]] + messages_history[-10:]
+
+        # First Stream (Initial Thought / Tool Decision)
+        collected_chunks = []
         
-        # Execute tools if any
-        if response.tool_calls:
-            for tool_call in response.tool_calls:
+        # Yield text chunks from the LLM
+        for chunk in self.llm.stream(messages_to_send):
+            collected_chunks.append(chunk)
+            yield chunk
+
+        # Aggregate chunks to check for tool calls
+        if collected_chunks:
+            ai_message = sum(collected_chunks[1:], collected_chunks[0])
+        else:
+            ai_message = AIMessage(content="")
+        
+        # Save the AI's first response (thought process) to history
+        self.conversation.add_message(ai_message)
+
+        # ]Tool Execution (If any)
+        if ai_message.tool_calls:
+            for tool_call in ai_message.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
                 
                 tool = self.tools_dict.get(tool_name)
                 if tool:
-                    result = tool.invoke(tool_args)
-                    tool_results.append({
-                        "name": tool_name,
-                        "args": tool_args,
-                        "result": result
-                    })
+                    # Execute tool
+                    result_str = tool.invoke(tool_args)
                     
-                    self.conversation.add_message(ToolMessage(
-                        content=result,
+                    # Create Tool Message
+                    tool_msg = ToolMessage(
+                        content=result_str,
                         tool_call_id=tool_call["id"],
                         name=tool_name
-                    ))
+                    )
+                    
+                    # Add to history
+                    self.conversation.add_message(tool_msg)
+                    
+                    # YIELD THE TOOL MESSAGE so app.py can render the Card/UI
+                    yield tool_msg
+
+            # Second Stream (Final Answer after tools)
+            final_chunks = []
             
-            # Get final response
-            response = self.llm.invoke(self.conversation.get_messages())
-            self.conversation.add_message(response)
-        
-        return response, tool_results
+            # Refresh history with new tool results
+            updated_history = self.conversation.get_messages()
+            msgs_to_send_v2 = [updated_history[0]] + updated_history[-10:]
+            
+            for chunk in self.llm.stream(msgs_to_send_v2):
+                final_chunks.append(chunk)
+                yield chunk
+            
+            # Save final response to history
+            if final_chunks:
+                final_message = sum(final_chunks[1:], final_chunks[0])
+                self.conversation.add_message(final_message)

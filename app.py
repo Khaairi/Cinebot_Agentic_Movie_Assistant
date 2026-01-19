@@ -254,18 +254,56 @@ class CineBotApp:
         human_message = HumanMessage(content=content_parts)
         
         with st.chat_message("AI"):
-            with st.spinner("Sedang memproses..."):
-                response, tool_results = agent.handle_message(human_message)
+            message_placeholder = st.empty()
+            full_response_text = ""
+
+            for item in agent.stream_handler(human_message):
                 
-                # Display tool results
-                for tool_result in tool_results:
-                    self.display_tool_result(tool_result)
-                
-                # Display final response
-                if response.content:
-                    st.markdown(response.content)
+                # Check for ToolMessage FIRST to prevent it from being treated as text
+                if isinstance(item, ToolMessage):
+                    # Clean the cursor
+                    message_placeholder.markdown(full_response_text)
+                    
+                    # Render Tool Card
+                    tool_data = {
+                        "name": item.name,
+                        "result": item.content
+                    }
+                    self.display_tool_result(tool_data)
+                    
+                    # Reset text placeholder for the explanation that comes AFTER the tool
+                    full_response_text = ""
+                    message_placeholder = st.empty()
+
+                # Handle Text Chunks (AIMessage)
+                elif isinstance(item, AIMessage) or hasattr(item, 'content'):
+                    chunk_content = item.content
+                    text_to_add = ""
+
+                    # Content is a String
+                    if isinstance(chunk_content, str):
+                        text_to_add = chunk_content
+                    
+                    # Content is a List 
+                    elif isinstance(chunk_content, list):
+                        for part in chunk_content:
+                            # If part is simple string
+                            if isinstance(part, str):
+                                text_to_add += part
+                            # If part is dict
+                            elif isinstance(part, dict) and "text" in part:
+                                text_to_add += part["text"]
+
+                    # Update UI only if found text
+                    if text_to_add:
+                        full_response_text += text_to_add
+                        message_placeholder.markdown(full_response_text + "▌")
+
+            # remove cursor
+            print(f"full: {full_response_text}")
+            message_placeholder.markdown(full_response_text)
         
-        # Update watchlist in session state
+        # Update watchlist session state
         st.session_state["watchlist"] = st.session_state["watchlist_obj"].to_list()
     
     def display_tool_result(self, tool_result: dict):
